@@ -1,5 +1,7 @@
+import os
 import sys
 import random
+import importlib
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -8,8 +10,14 @@ import torch
 import torch.nn as nn
 from huggingface_hub import hf_hub_download, snapshot_download
 
+# import PrithviWxC
+# importlib.reload(PrithviWxC)
+
 sys.path.append("../")
 from PrithviWxC.dataloaders.merra2 import Merra2Dataset
+from PrithviWxC.model import PrithviWxC
+
+cuda_visible_devices = os.environ.get('CUDA_VISIBLE_DEVICES')
 
 torch.jit.enable_onednn_fusion(True)
 if torch.cuda.is_available():
@@ -189,11 +197,11 @@ import yaml
 
 from PrithviWxC.model import PrithviWxC
 
-hf_hub_download(
-    repo_id="Prithvi-WxC/prithvi.wxc.2300m.v1",
-    filename="config.yaml",
-    local_dir=".",
-)
+# hf_hub_download(
+#     repo_id="Prithvi-WxC/prithvi.wxc.2300m.v1",
+#     filename="config.yaml",
+#     local_dir=".",
+# )
 
 with open("./config.yaml", "r") as f:
     config = yaml.safe_load(f)
@@ -232,7 +240,7 @@ model = PrithviWxC(
     checkpoint_decoder=[],
 ).to(device)
 
-
+# print(model)
 
 weights_path = Path("./weights/prithvi.wxc.2300m.v1.pt")
 hf_hub_download(
@@ -246,11 +254,27 @@ state_dict = torch.load(weights_path, weights_only=False, map_location="cpu")
 if "model_state" in state_dict:
     state_dict = state_dict["model_state"]
 
-state_dict = {f"module.{k}": v for k, v in state_dict.items()}
+# state_dict = {f"module.{k}": v for k, v in state_dict.items()}
 
-model = nn.DataParallel(model, device_ids=list(range(torch.cuda.device_count())))
+# print(state_dict.keys())
+
+state_dict_keys = list(state_dict.keys())
+cutoff = 264
+
+print(len(state_dict_keys))
+
+# Remove all keys from the second half
+for key in state_dict_keys[cutoff:]:
+    state_dict.pop(key)
+
+# print(state_dict.keys())
+
+# model = nn.DataParallel(model, device_ids=list(range(torch.cuda.device_count())))
 model.load_state_dict(state_dict, strict=True)
 model = model.to(device)
+
+# print(model)
+# print("Done")
 
 # if (hasattr(model, "device") and model.device != device) or not hasattr(
 #     model, "device"
@@ -271,13 +295,16 @@ with torch.no_grad():
     model.eval()
     out = model(batch)
 
+print(out)
+print(out.shape)
+
 t2m = out[0, 12].cpu().numpy()
 
 lat = np.linspace(-90, 90, out.shape[-2])
 lon = np.linspace(-180, 180, out.shape[-1])
 X, Y = np.meshgrid(lon, lat)
 
-plt.contourf(X, Y, t2m, 100)
-plt.gca().set_aspect("equal")
-plt.show()
+# plt.contourf(X, Y, t2m, 100)
+# plt.gca().set_aspect("equal")
+# plt.show()
 

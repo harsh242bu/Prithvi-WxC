@@ -1277,6 +1277,107 @@ class PrithviWxC(nn.Module):
         # Encoder
         x_encoded = self.encoder(unmasked)
 
+        return x_encoded
+    
+    def forward_original(self, batch: dict[str, torch.Tensor]) -> torch.Tensor:
+        """
+        Args:
+            batch: Dictionary the following keys::
+
+                'x': Tensor of shape [batch, time, parameter, lat, lon]
+                'y': Tensor of shape [batch, parameter, lat, lon]
+                'static': Tensor of shape [batch, channel_static, lat, lon]
+                'climate': Optional tensor of shape [batch, parameter, lat, lon]
+                'input_time': Tensor of shape [batch]. Or none.
+                'lead_time': Tensor of shape [batch]. Or none.
+
+        Returns:
+            Tensor: Tensor of shape [batch, parameter, lat, lon].
+        """  # noqa: E501
+        x_rescaled = (batch["x"] - self.input_scalers_mu) / (
+            self.input_scalers_sigma + self.input_scalers_epsilon
+        )
+        batch_size = x_rescaled.shape[0]
+
+        if self.positional_encoding == "fourier":
+            x_static_pos = self.fourier_pos_encoding(batch["static"])
+            x_static = (
+                batch["static"][:, 2:] - self.static_input_scalers_mu[:, 3:]
+            ) / (
+                self.static_input_scalers_sigma[:, 3:]
+                + self.static_input_scalers_epsilon
+            )
+        else:
+            x_static = (batch["static"] - self.static_input_scalers_mu) / (
+                self.static_input_scalers_sigma
+                + self.static_input_scalers_epsilon
+            )
+
+        if self.residual == "temporal":
+            # We create a residual of same shape as y
+            index = torch.where(
+                batch["lead_time"] > 0, batch["x"].shape[1] - 1, 0
+            )
+            index = index.view(-1, 1, 1, 1, 1)
+            index = index.expand(batch_size, 1, *batch["x"].shape[2:])
+            x_hat = torch.gather(batch["x"], dim=1, index=index)
+            x_hat = x_hat.squeeze(1)
+        elif self.residual == "climate":
+            climate_scaled = (
+                batch["climate"] - self.input_scalers_mu.view(1, -1, 1, 1)
+            ) / (
+                self.input_scalers_sigma.view(1, -1, 1, 1)
+                + self.input_scalers_epsilon
+            )
+
+        # [batch, time, parameter, lat, lon]
+        # -> [batch, time x parameter, lat, lon]
+        x_rescaled = x_rescaled.flatten(1, 2)
+        # Parameter dropout
+        x_rescaled = self.parameter_dropout(x_rescaled)
+
+        x_embedded = self.patch_embedding(x_rescaled)
+
+        if self.residual == "climate":
+            static_embedded = self.patch_embedding_static(
+                torch.cat((x_static, climate_scaled), dim=1)
+            )
+        else:
+            static_embedded = self.patch_embedding_static(x_static)
+
+        if self.positional_encoding == "fourier":
+            static_embedded += x_static_pos
+
+        x_embedded = self.to_patching(x_embedded)
+        static_embedded = self.to_patching(static_embedded)
+
+        time_encoding = self.time_encoding(
+            batch["input_time"], batch["lead_time"]
+        )
+
+        tokens = x_embedded + static_embedded + time_encoding
+
+        # Now we generate masks based on masking_mode
+        indices_masked, indices_unmasked = self.generate_mask(
+            (batch_size, self._nglobal_mu)
+        )
+        indices_masked = indices_masked.to(device=tokens.device)
+        indices_unmasked = indices_unmasked.to(device=tokens.device)
+        maskdim: int = indices_masked.ndim
+
+        # Unmasking
+        unmask_view = (*indices_unmasked.shape, *[1] * (tokens.ndim - maskdim))
+        unmasked = torch.gather(
+            tokens,
+            dim=maskdim - 1,
+            index=indices_unmasked.view(*unmask_view).expand(
+                *indices_unmasked.shape, *tokens.shape[maskdim:]
+            ),
+        )
+
+        # Encoder
+        x_encoded = self.encoder(unmasked)
+
         # Generate and position encode the mask tokens
         # [1, 1, 1, embed_dim]
         # -> [batch, global_seq_masked, local seq, embed_dim]

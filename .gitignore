@@ -1,3 +1,7 @@
+examples/climatology
+examples/weights
+examples/merra-2
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
