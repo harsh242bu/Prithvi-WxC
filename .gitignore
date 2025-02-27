@@ -2,6 +2,11 @@ examples/climatology
 examples/weights
 examples/merra-2
 
+climatology
+merra-2
+weights
+gdelt_data
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

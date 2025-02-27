@@ -6,3 +6,4 @@ pip3 install torch torchvision torchaudio
 pip install huggingface_hub
 pip install h5py
 pip install pandas
+pip install -U crawl4ai
