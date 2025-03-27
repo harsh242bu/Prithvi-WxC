@@ -6,6 +6,10 @@ climatology
 merra-2
 weights
 gdelt_data
+.obsidian
+cleaned_articles
+raw_articles
+gdelt_data_with_categories.csv
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
